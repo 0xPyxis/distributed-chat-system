@@ -4,9 +4,10 @@ import (
 	"distributed-chat-system/internal/message"
 	"net/http"
 
-	"github.com/gorilla/websocket"
-	"encoding/json"
 	"distributed-chat-system/internal/connection"
+	"distributed-chat-system/internal/storage"
+	"encoding/json"
+	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
@@ -15,11 +16,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+var manager = connection.NewManager()
+
 func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	return upgrader.Upgrade(w, r, nil)
 }
 
-func ReadLoop(conn *connection.Connection, manager *connection.Manager) {
+func ReadLoop(conn *connection.Connection) {
 	defer func() {
 		manager.Remove(conn.UserID, conn)
 		conn.Socket.Close()
@@ -51,6 +54,8 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 	json.Unmarshal(data, &msg)
 
 	if msg.Type == "message" {
+		store.SaveMessage(sender.UserID, msg.To, msg.Body)
+
 		msg.From = sender.UserID
 		out, _ := json.Marshal(msg)
 
@@ -63,9 +68,52 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 }
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	_ = conn
+	_, data, err := ws.ReadMessage()
+	if err != nil {
+		ws.Close()
+		return
+	}
+
+	var msg message.Message
+	json.Unmarshal(data, &msg)
+
+	if msg.Type != "auth" || msg.From == "" {
+		ws.Close()
+		return
+	}
+
+	conn := &connection.Connection{
+		UserID: msg.From,
+		Socket: ws,
+		Send:   make(chan []byte, 256),
+	}
+
+	manager.Add(conn.UserID, conn)
+
+	msgs := store.GetUndelivered(conn.UserID)
+
+	go WriteLoop(conn)
+	go ReadLoop(conn)
+
+	for _, m := range msgs {
+		outMsg := message.Message{
+			Type: "message",
+			From: m.Sender,
+			To:   m.Receiver,
+			Body: m.Body,
+		}
+		data, _ := json.Marshal(outMsg)
+
+		conn.Send <- data
+
+		store.MarkDelivered(m.ID)
+
+	}
+
 }
+
+var store = storage.NewStore()
