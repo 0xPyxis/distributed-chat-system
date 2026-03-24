@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"distributed-chat-system/internal/connection"
+	"distributed-chat-system/internal/pubsub"
 	"distributed-chat-system/internal/storage"
 	"encoding/json"
 	"github.com/gorilla/websocket"
@@ -17,6 +18,19 @@ var upgrader = websocket.Upgrader{
 }
 
 var manager = connection.NewManager()
+var redisClient = pubsub.NewRedis()
+
+func init() {
+	redisClient.Subscribe("chat", func(data []byte) {
+		var msg message.Message
+		json.Unmarshal(data, &msg)
+		targets := manager.Get(msg.To)
+
+		for _, conn := range targets {
+			conn.Send <- data
+		}
+	})
+}
 
 func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	return upgrader.Upgrade(w, r, nil)
@@ -59,6 +73,10 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		msg.From = sender.UserID
 		out, _ := json.Marshal(msg)
 
+		// publish to redis
+		redisClient.Publish("chat", out)
+
+		// also deliver locally
 		targets := manager.Get(msg.To)
 
 		for _, conn := range targets {
