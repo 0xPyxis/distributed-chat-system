@@ -54,8 +54,8 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 	json.Unmarshal(data, &msg)
 
 	if msg.Type == "message" {
-		store.SaveMessage(sender.UserID, msg.To, msg.Body)
-
+		msgID := store.SaveMessage(sender.UserID, msg.To, msg.Body)
+		msg.MessageID = msgID
 		msg.From = sender.UserID
 		out, _ := json.Marshal(msg)
 
@@ -64,6 +64,11 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		for _, conn := range targets {
 			conn.Send <- out
 		}
+	}
+
+	if msg.Type == "ack" {
+		store.MarkDelivered(msg.MessageID)
+		return
 	}
 }
 
@@ -101,16 +106,15 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	for _, m := range msgs {
 		outMsg := message.Message{
-			Type: "message",
-			From: m.Sender,
-			To:   m.Receiver,
-			Body: m.Body,
+			Type:      "message",
+			From:      m.Sender,
+			To:        m.Receiver,
+			Body:      m.Body,
+			MessageID: m.ID,
 		}
 		data, _ := json.Marshal(outMsg)
 
 		conn.Send <- data
-
-		store.MarkDelivered(m.ID)
 
 	}
 

@@ -22,15 +22,18 @@ func NewStore() *Store {
 	return &Store{DB: db}
 }
 
-func (s *Store) SaveMessage(sender, receiver, body string) {
-	_, err := s.DB.Exec(
-		"INSERT INTO messages (sender, receiver, body, delivered) VALUES ($1, $2, $3, false)",
+func (s *Store) SaveMessage(sender, receiver, body string) int {
+	var id int
+	err := s.DB.QueryRow(
+		"INSERT INTO messages (sender, receiver, body, delivered) VALUES ($1, $2, $3, false) RETURNING id",
 		sender, receiver, body,
-	)
+	).Scan(&id)
 
 	if err != nil {
-		log.Println("save error: ", err)
+		log.Println(err)
+		return 0
 	}
+	return id
 }
 
 type DBMessage struct {
