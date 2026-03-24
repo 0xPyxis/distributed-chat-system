@@ -11,6 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var serverID = "server-1"
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
@@ -24,6 +26,11 @@ func init() {
 	redisClient.Subscribe("chat", func(data []byte) {
 		var msg message.Message
 		json.Unmarshal(data, &msg)
+
+		if msg.Origin == serverID {
+			return
+		}
+
 		targets := manager.Get(msg.To)
 
 		for _, conn := range targets {
@@ -71,6 +78,8 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		msgID := store.SaveMessage(sender.UserID, msg.To, msg.Body)
 		msg.MessageID = msgID
 		msg.From = sender.UserID
+		msg.Origin = serverID
+
 		out, _ := json.Marshal(msg)
 
 		// publish to redis
@@ -129,6 +138,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			To:        m.Receiver,
 			Body:      m.Body,
 			MessageID: m.ID,
+			Origin: "storage",
 		}
 		data, _ := json.Marshal(outMsg)
 
@@ -139,3 +149,4 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 var store = storage.NewStore()
+

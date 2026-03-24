@@ -6,4 +6,5 @@ type Message struct {
 	To string `json:"to"`
 	Body string `json:"body"`
 	MessageID int `json:"message_id"`
+	Origin string `json:"origin"`
 }
