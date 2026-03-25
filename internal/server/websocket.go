@@ -23,13 +23,9 @@ var manager = connection.NewManager()
 var redisClient = pubsub.NewRedis()
 
 func init() {
-	redisClient.Subscribe("chat", func(data []byte) {
+	redisClient.Subscribe("chat:"+serverID, func(data []byte) {
 		var msg message.Message
 		json.Unmarshal(data, &msg)
-
-		if msg.Origin == serverID {
-			return
-		}
 
 		targets := manager.Get(msg.To)
 
@@ -47,6 +43,9 @@ func ReadLoop(conn *connection.Connection) {
 	defer func() {
 		manager.Remove(conn.UserID, conn)
 		conn.Socket.Close()
+		close(conn.Send)
+
+		redisClient.RemoveUser(conn.UserID)
 
 	}()
 
@@ -86,10 +85,21 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		redisClient.Publish("chat", out)
 
 		// also deliver locally
-		targets := manager.Get(msg.To)
+		targetServer := redisClient.GetUserServer(msg.To)
 
-		for _, conn := range targets {
-			conn.Send <- out
+		if targetServer == "" {
+			// user offline -> just store (already done)
+			return
+		}
+
+		if targetServer == serverID {	// same server
+			targets := manager.Get(msg.To)
+			for _, conn := range targets {
+				conn.Send <- out
+			}
+			return
+		} else {
+			redisClient.Publish("chat:"+targetServer, out)  // different server
 		}
 	}
 
@@ -126,6 +136,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	manager.Add(conn.UserID, conn)
 
+	redisClient.SetUserServer(conn.UserID, serverID)
+
 	msgs := store.GetUndelivered(conn.UserID)
 
 	go WriteLoop(conn)
@@ -138,7 +150,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			To:        m.Receiver,
 			Body:      m.Body,
 			MessageID: m.ID,
-			Origin: "storage",
+			Origin:    "storage",
 		}
 		data, _ := json.Marshal(outMsg)
 
@@ -149,4 +161,3 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 var store = storage.NewStore()
-
