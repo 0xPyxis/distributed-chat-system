@@ -91,6 +91,7 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 			// user offline -> just store (already done)
 			return
 		}
+		
 
 		if targetServer == serverID {	// same server
 			targets := manager.Get(msg.To)
