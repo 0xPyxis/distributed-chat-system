@@ -9,6 +9,7 @@ import (
 	"distributed-chat-system/internal/storage"
 	"encoding/json"
 	"github.com/gorilla/websocket"
+	"time"
 )
 
 var serverID = "server-1"
@@ -142,6 +143,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	redisClient.AddUserServer(conn.UserID, serverID)
 
+	go startHeartbeat(conn.UserID)
+
 	msgs := store.GetUndelivered(conn.UserID)
 
 	go WriteLoop(conn)
@@ -165,3 +168,11 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 var store = storage.NewStore()
+
+func startHeartbeat(userID string) {
+	ticker := time.NewTicker(10 * time.Second)
+
+	for range ticker.C {
+		redisClient.AddUserServer(userID, serverID)
+	}
+}

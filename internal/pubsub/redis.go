@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/redis/go-redis/v9"
 	"log"
+	"time"
 )
 
 var ctx = context.Background()
@@ -40,10 +41,16 @@ func (r *RedisClient) Subscribe(channel string, handler func([]byte)) {
 }
 
 func (r *RedisClient) AddUserServer(userID, serverID string) {
-	err := r.Client.SAdd(ctx, "user:"+userID, serverID).Err()
+	key := "user:"+userID
+	
+	err := r.Client.SAdd(ctx, key, serverID).Err()
 	if err != nil {
 		log.Println("add user server error:", err)
+		return
 	}
+
+	// set TTL (expiry)
+	r.Client.Expire(ctx, key, 30*time.Second)
 }
 
 func (r *RedisClient) GetUserServers(userID string) []string {
