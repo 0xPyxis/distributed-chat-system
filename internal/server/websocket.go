@@ -45,7 +45,7 @@ func ReadLoop(conn *connection.Connection) {
 		conn.Socket.Close()
 		close(conn.Send)
 
-		redisClient.RemoveUser(conn.UserID)
+		redisClient.RemoveUserServer(conn.UserID, serverID)
 
 	}()
 
@@ -85,21 +85,25 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		redisClient.Publish("chat", out)
 
 		// also deliver locally
-		targetServer := redisClient.GetUserServer(msg.To)
+		targetServers := redisClient.GetUserServers(msg.To)
 
-		if targetServer == "" {
-			// user offline -> just store (already done)
+		if len(targetServers) == 0 {
+			// user offline -> already stored
 			return
 		}
 
-		if targetServer == serverID {	// same server
-			targets := manager.Get(msg.To)
-			for _, conn := range targets {
-				conn.Send <- out
+		for _, srv := range targetServers {
+			if srv == serverID {
+				// local delivery
+				targets := manager.Get(msg.To)
+				for _, conn := range targets {
+					conn.Send <- out
+				}
+				continue
 			}
-			return
-		} else {
-			redisClient.Publish("chat:"+targetServer, out)  // different server
+
+			// remote delivery
+			redisClient.Publish("chat:"+srv, out)
 		}
 	}
 
@@ -136,7 +140,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	manager.Add(conn.UserID, conn)
 
-	redisClient.SetUserServer(conn.UserID, serverID)
+	redisClient.AddUserServer(conn.UserID, serverID)
 
 	msgs := store.GetUndelivered(conn.UserID)
 

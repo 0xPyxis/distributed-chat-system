@@ -39,25 +39,26 @@ func (r *RedisClient) Subscribe(channel string, handler func([]byte)) {
 	}()
 }
 
-func (r *RedisClient) SetUserServer(userID, serverID string) {
-	err := r.Client.Set(ctx, "user:"+userID, serverID, 0).Err()
+func (r *RedisClient) AddUserServer(userID, serverID string) {
+	err := r.Client.SAdd(ctx, "user:"+userID, serverID).Err()
 	if err != nil {
-		log.Println("set user server error:", err)
+		log.Println("add user server error:", err)
 	}
 }
 
-func (r *RedisClient) GetUserServer(userID string) string {
-	val, err := r.Client.Get(ctx, "user:"+userID).Result()
+func (r *RedisClient) GetUserServers(userID string) []string {
+	vals, err := r.Client.SMembers(ctx, "user:"+userID).Result()
 	if err != nil {
-		return ""
+		return nil
 	}
-	return val
+	return vals
 }
 
-func (r *RedisClient) RemoveUser(userID string) {
-	err:= r.Client.Del(ctx, "user:"+userID).Err()
-	if err!=nil {
-		log.Println("remove user error:", err)
+func (r *RedisClient) RemoveUserServer(userID, serverID string) {
+	err := r.Client.SRem(ctx, "user:"+userID, serverID).Err()
+	if err != nil {
+		log.Println("remove user server error:", err)
 	}
 }
+
 
