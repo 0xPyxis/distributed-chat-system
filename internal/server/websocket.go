@@ -75,10 +75,24 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 	json.Unmarshal(data, &msg)
 
 	if msg.Type == "message" {
-		msgID := store.SaveMessage(sender.UserID, msg.To, msg.Body)
-		msg.MessageID = msgID
+		// set basic fields
 		msg.From = sender.UserID
 		msg.Origin = serverID
+
+		// compute conversation id
+		conversationID := getConversationID(msg.From, msg.To)
+		msg.ConversationID = conversationID
+
+		// get sequence from redis
+		seq, err := redisClient.GetNextSequence(conversationID)
+		if err != nil {
+			return
+		}
+		msg.SequenceNumber = seq
+
+		// save message
+		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.SequenceNumber)
+		msg.MessageID = msgID
 
 		out, _ := json.Marshal(msg)
 
@@ -157,6 +171,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			To:        m.Receiver,
 			Body:      m.Body,
 			MessageID: m.ID,
+			ConversationID: m.ConversationID,
+			SequenceNumber: m.SequenceNumber,
 			Origin:    "storage",
 		}
 		data, _ := json.Marshal(outMsg)
@@ -175,4 +191,12 @@ func startHeartbeat(userID string) {
 	for range ticker.C {
 		redisClient.AddUserServer(userID, serverID)
 	}
+}
+
+// helper function for handleIncoming
+func getConversationID(a, b string) string {
+	if a < b {
+		return a + ":" + b
+	}
+	return b + ":" + a
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/redis/go-redis/v9"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -41,12 +42,11 @@ func (r *RedisClient) Subscribe(channel string, handler func([]byte)) {
 }
 
 func (r *RedisClient) AddUserServer(userID, serverID string) {
-	key := "user:"+userID
-	
-	err := r.Client.SAdd(ctx, key, serverID).Err()
+	key := "presence:" + userID + ":" + serverID
+
+	err := r.Client.Set(ctx, key, "1", 30*time.Second).Err()
 	if err != nil {
 		log.Println("add user server error:", err)
-		return
 	}
 
 	// set TTL (expiry)
@@ -54,18 +54,39 @@ func (r *RedisClient) AddUserServer(userID, serverID string) {
 }
 
 func (r *RedisClient) GetUserServers(userID string) []string {
-	vals, err := r.Client.SMembers(ctx, "user:"+userID).Result()
+	pattern := "presence:" + userID + ":*"
+
+	keys, err := r.Client.Keys(ctx, pattern).Result()
 	if err != nil {
 		return nil
 	}
-	return vals
+
+	var servers []string
+	for _, key := range keys {
+		parts := strings.Split(key, ":")
+		if len(parts) == 3 {
+			servers = append(servers, parts[2])
+		}
+	}
+
+	return servers
 }
 
 func (r *RedisClient) RemoveUserServer(userID, serverID string) {
-	err := r.Client.SRem(ctx, "user:"+userID, serverID).Err()
+	key := "presence:" + userID + ":" + serverID
+
+	err := r.Client.Del(ctx, key).Err()
+
 	if err != nil {
 		log.Println("remove user server error:", err)
 	}
 }
 
-
+func (r *RedisClient) GetNextSequence(conversationID string) (int64, error) {
+	key := "conversation:" + conversationID + ":seq"
+	seq, err := r.Client.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	return seq, nil
+}

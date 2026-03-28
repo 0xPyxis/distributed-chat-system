@@ -7,4 +7,6 @@ type Message struct {
 	Body string `json:"body"`
 	MessageID int `json:"message_id"`
 	Origin string `json:"origin"`
+	ConversationID string `json:"conversation_id"`
+	SequenceNumber int64 `json:"sequence_number"`
 }

@@ -22,15 +22,16 @@ func NewStore() *Store {
 	return &Store{DB: db}
 }
 
-func (s *Store) SaveMessage(sender, receiver, body string) int {
+func (s *Store) SaveMessage(sender, receiver, body, conversationID string, seq int64) int {
+	query := `
+	INSERT INTO messages (sender,receiver,body,conversation_id,sequence_number,delivered)
+	VALUES ($1,$2,$3,$4,$5,false)
+	RETURNING id
+	`
 	var id int
-	err := s.DB.QueryRow(
-		"INSERT INTO messages (sender, receiver, body, delivered) VALUES ($1, $2, $3, false) RETURNING id",
-		sender, receiver, body,
-	).Scan(&id)
+	err := s.DB.QueryRow(query, sender, receiver, body, conversationID, seq).Scan(&id)
 
 	if err != nil {
-		log.Println(err)
 		return 0
 	}
 	return id
@@ -41,11 +42,13 @@ type DBMessage struct {
 	Sender   string
 	Receiver string
 	Body     string
+	ConversationID string
+	SequenceNumber int64
 }
 
 func (s *Store) GetUndelivered(user string) []DBMessage {
 	rows, err := s.DB.Query(
-		"SELECT id,sender,receiver,body FROM messages WHERE receiver=$1 AND delivered=false ORDER BY created_at",
+		"SELECT id,sender,receiver,body,conversation_id,sequence_number FROM messages WHERE receiver=$1 AND delivered=false ORDER BY conversation_id,sequence_number ASC",
 		user,
 	)
 
