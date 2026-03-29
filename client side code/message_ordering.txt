@@ -1,0 +1,63 @@
+package inbox
+
+import (
+	"distributed-chat-system/message"
+)
+
+type OrderedInbox struct {
+	lastSeq map[string]int
+	buffer  map[string]map[int]message.Message
+}
+
+func NewOrderedInbox() *OrderedInbox {
+	return &OrderedInbox{
+		lastSeq: make(map[string]int),
+		buffer:  make(map[string]map[int]message.Message),
+	}
+}
+
+func (o *OrderedInbox) Handle(msg message.Message) []message.Message {
+	conv := msg.ConversationID
+	seq := msg.SequenceNumber
+
+	if o.buffer[conv] == nil {
+		o.buffer[conv] = make(map[int]message.Message)
+	}
+
+	var ready []message.Message
+	expected := o.lastSeq[conv] + 1
+
+	if seq == expected {
+		ready = append(ready, msg)
+		o.lastSeq[conv] = seq
+
+		# flush buffer
+		for {
+			next := o.lastSeq[conv] + 1
+			m, ok := o.buffer[conv][next]
+			if !ok {
+				break
+			}
+			ready = append(ready, m)
+			delete(o.buffer[conv], next)
+			o.lastSeq[conv] = next
+		}
+		return ready
+	}
+	if seq > expected {
+		o.buffer[conv][seq] = msg
+		return nil
+	}
+
+	# duplicate / old message
+	return nil
+}
+
+# in test client or UI layer :
+msgs := inbox.Handle(incomingMsg)
+
+for _, m := range msgs {
+	display(m)
+}
+
+
