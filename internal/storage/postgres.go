@@ -22,17 +22,20 @@ func NewStore() *Store {
 	return &Store{DB: db}
 }
 
-func (s *Store) SaveMessage(sender, receiver, body, conversationID string, seq int64) int {
+func (s *Store) SaveMessage(sender, receiver, body, conversationID, ClientMsgID string, seq int64) int {
 	query := `
-	INSERT INTO messages (sender,receiver,body,conversation_id,sequence_number,delivered)
-	VALUES ($1,$2,$3,$4,$5,false)
+	INSERT INTO messages (sender,receiver,body,conversation_id,sequence_number,client_msg_id,delivered)
+	VALUES ($1,$2,$3,$4,$5,$6,false)
+	ON CONFLICT (client_msg_id) DO NOTHING
 	RETURNING id
 	`
 	var id int
-	err := s.DB.QueryRow(query, sender, receiver, body, conversationID, seq).Scan(&id)
+	err := s.DB.QueryRow(query, sender, receiver, body, conversationID, seq, ClientMsgID).Scan(&id)
 
 	if err != nil {
-		return 0
+		// duplicate -> fetching existing id
+		query2 := `SELECT id FROM messages WHERE client_msg_id=$1`
+		s.DB.QueryRow(query2,ClientMsgID).Scan(&id)
 	}
 	return id
 }

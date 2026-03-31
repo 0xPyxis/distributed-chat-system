@@ -91,7 +91,7 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		msg.SequenceNumber = seq
 
 		// save message
-		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.SequenceNumber)
+		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber), )
 		msg.MessageID = msgID
 
 		out, _ := json.Marshal(msg)
