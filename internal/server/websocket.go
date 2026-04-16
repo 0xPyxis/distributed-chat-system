@@ -1,15 +1,17 @@
 package server
 
 import (
-	"distributed-chat-system/internal/message"
-	"net/http"
-
 	"distributed-chat-system/internal/connection"
+	"distributed-chat-system/internal/logger"
+	"distributed-chat-system/internal/message"
 	"distributed-chat-system/internal/pubsub"
 	"distributed-chat-system/internal/storage"
 	"encoding/json"
-	"github.com/gorilla/websocket"
+	"net/http"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 var serverID = "server-1"
@@ -26,12 +28,25 @@ var redisClient = pubsub.NewRedis()
 func init() {
 	redisClient.Subscribe("chat:"+serverID, func(data []byte) {
 		var msg message.Message
-		json.Unmarshal(data, &msg)
+		if err := json.Unmarshal(data, &msg); err != nil {
+			logger.Log.Error("failed to unmarshal message",
+				zap.Error(err),
+			)
+			return
+		}
 
 		targets := manager.Get(msg.To)
 
 		for _, conn := range targets {
-			conn.Send <- data
+			select {
+			case conn.Send <- data:
+			default:
+				logger.Log.Warn("backpressure drop (subscriber)",
+					zap.String("user", msg.To),
+				)
+				conn.Socket.Close()
+				manager.Remove(conn.UserID, conn)
+			}
 		}
 	})
 }
@@ -42,21 +57,26 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 
 func ReadLoop(conn *connection.Connection) {
 	defer func() {
-		manager.Remove(conn.UserID, conn)
+		logger.Log.Info("connection closed",
+			zap.String("user", conn.UserID),
+		)
+
 		conn.Socket.Close()
+		manager.Remove(conn.UserID, conn)
 		close(conn.Send)
-
 		redisClient.RemoveUserServer(conn.UserID, serverID)
-
 	}()
 
 	for {
 		_, data, err := conn.Socket.ReadMessage()
 		if err != nil {
+			logger.Log.Warn("read error",
+				zap.String("user", conn.UserID),
+				zap.Error(err),
+			)
 			break
 		}
 
-		// process message
 		handleIncoming(conn, manager, data)
 	}
 }
@@ -65,6 +85,10 @@ func WriteLoop(conn *connection.Connection) {
 	for msg := range conn.Send {
 		err := conn.Socket.WriteMessage(websocket.TextMessage, msg)
 		if err != nil {
+			logger.Log.Warn("write error",
+				zap.String("user", conn.UserID),
+				zap.Error(err),
+			)
 			return
 		}
 	}
@@ -72,63 +96,63 @@ func WriteLoop(conn *connection.Connection) {
 
 func handleIncoming(sender *connection.Connection, manager *connection.Manager, data []byte) {
 	var msg message.Message
-	json.Unmarshal(data, &msg)
+	if err := json.Unmarshal(data, &msg); err != nil {
+		logger.Log.Error("invalid message",
+			zap.Error(err),
+		)
+		return
+	}
 
 	if !redisClient.AllowMessage(sender.UserID, 5) {
+		logger.Log.Warn("rate limited",
+			zap.String("user", sender.UserID),
+		)
 		return
 	}
 
 	if msg.Type == "message" {
-		// set basic fields
 		msg.From = sender.UserID
 		msg.Origin = serverID
 
-		// compute conversation id
 		conversationID := getConversationID(msg.From, msg.To)
 		msg.ConversationID = conversationID
 
-		// get sequence from redis
 		seq, err := redisClient.GetNextSequence(conversationID)
 		if err != nil {
 			return
 		}
 		msg.SequenceNumber = seq
 
-		// save message
 		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber))
 		msg.MessageID = msgID
 
 		out, _ := json.Marshal(msg)
 
-		// publish to redis
 		redisClient.Publish("chat", out)
 
-		// also deliver locally
 		targetServers := redisClient.GetUserServers(msg.To)
 
 		if len(targetServers) == 0 {
-			// user offline -> already stored
 			return
 		}
 
 		for _, srv := range targetServers {
 			if srv == serverID {
-				// local delivery
 				targets := manager.Get(msg.To)
 				for _, conn := range targets {
 					select {
 					case conn.Send <- out:
-						// ok
 					default:
-						// channel full -> handle backpressure
-						manager.Remove(conn.UserID, conn)
+						logger.Log.Warn("backpressure disconnect",
+							zap.String("user", conn.UserID),
+						)
 						conn.Socket.Close()
+						manager.Remove(conn.UserID, conn)
 					}
 				}
 				continue
 			}
 
-			// remote delivery
 			redisClient.Publish("chat:"+srv, out)
 		}
 	}
@@ -142,8 +166,10 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		logger.Log.Error("upgrade failed", zap.Error(err))
 		return
 	}
+
 	_, data, err := ws.ReadMessage()
 	if err != nil {
 		ws.Close()
@@ -164,8 +190,11 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Send:   make(chan []byte, 256),
 	}
 
-	manager.Add(conn.UserID, conn)
+	logger.Log.Info("user connected",
+		zap.String("user", conn.UserID),
+	)
 
+	manager.Add(conn.UserID, conn)
 	redisClient.AddUserServer(conn.UserID, serverID)
 
 	go startHeartbeat(conn.UserID)
@@ -189,9 +218,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		data, _ := json.Marshal(outMsg)
 
 		conn.Send <- data
-
 	}
-
 }
 
 var store = storage.NewStore()
@@ -204,7 +231,6 @@ func startHeartbeat(userID string) {
 	}
 }
 
-// helper function for handleIncoming
 func getConversationID(a, b string) string {
 	if a < b {
 		return a + ":" + b

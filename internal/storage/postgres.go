@@ -2,9 +2,11 @@ package storage
 
 import (
 	"database/sql"
-	"log"
 
 	_ "github.com/lib/pq"
+
+	"distributed-chat-system/internal/logger"
+	"go.uber.org/zap"
 )
 
 type Store struct {
@@ -16,7 +18,7 @@ func NewStore() *Store {
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatal(err)
+		logger.Log.Fatal("db connection failed", zap.Error(err))
 	}
 
 	return &Store{DB: db}
@@ -29,24 +31,38 @@ func (s *Store) SaveMessage(sender, receiver, body, conversationID, ClientMsgID 
 	ON CONFLICT (client_msg_id) DO NOTHING
 	RETURNING id
 	`
+
 	var id int
 	err := s.DB.QueryRow(query, sender, receiver, body, conversationID, seq, ClientMsgID).Scan(&id)
 
 	if err != nil {
-		// duplicate -> fetching existing id
+		// duplicate or error
+		logger.Log.Warn("insert conflict or failed, fetching existing",
+			zap.String("client_msg_id", ClientMsgID),
+			zap.Error(err),
+		)
+
 		query2 := `SELECT id FROM messages WHERE client_msg_id=$1`
-		s.DB.QueryRow(query2,ClientMsgID).Scan(&id)
+		err2 := s.DB.QueryRow(query2, ClientMsgID).Scan(&id)
+		if err2 != nil {
+			logger.Log.Error("failed to fetch existing message",
+				zap.String("client_msg_id", ClientMsgID),
+				zap.Error(err2),
+			)
+			return 0
+		}
 	}
+
 	return id
 }
 
 type DBMessage struct {
-	ID       int
-	Sender   string
-	Receiver string
-	Body     string
-	ConversationID string
-	SequenceNumber int64
+	ID              int
+	Sender          string
+	Receiver        string
+	Body            string
+	ConversationID  string
+	SequenceNumber  int64
 }
 
 func (s *Store) GetUndelivered(user string) []DBMessage {
@@ -56,7 +72,10 @@ func (s *Store) GetUndelivered(user string) []DBMessage {
 	)
 
 	if err != nil {
-		log.Println(err)
+		logger.Log.Error("failed to fetch undelivered messages",
+			zap.String("user", user),
+			zap.Error(err),
+		)
 		return nil
 	}
 
@@ -66,9 +85,16 @@ func (s *Store) GetUndelivered(user string) []DBMessage {
 
 	for rows.Next() {
 		var m DBMessage
-		rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Body)
+		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Body, &m.ConversationID, &m.SequenceNumber)
+		if err != nil {
+			logger.Log.Error("row scan failed",
+				zap.Error(err),
+			)
+			continue
+		}
 		result = append(result, m)
 	}
+
 	return result
 }
 
@@ -79,6 +105,9 @@ func (s *Store) MarkDelivered(id int) {
 	)
 
 	if err != nil {
-		log.Println(err)
+		logger.Log.Error("failed to mark delivered",
+			zap.Int("message_id", id),
+			zap.Error(err),
+		)
 	}
 }
