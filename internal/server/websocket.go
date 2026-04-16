@@ -112,7 +112,14 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 				// local delivery
 				targets := manager.Get(msg.To)
 				for _, conn := range targets {
-					conn.Send <- out
+					select {
+					case conn.Send <- out:
+						// ok
+					default :
+						// channel full -> handle backpressure
+						manager.Remove(conn.UserID, conn)
+						conn.Socket.Close()
+					}
 				}
 				continue
 			}
