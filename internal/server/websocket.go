@@ -6,6 +6,7 @@ import (
 	"distributed-chat-system/internal/message"
 	"distributed-chat-system/internal/pubsub"
 	"distributed-chat-system/internal/storage"
+	"distributed-chat-system/internal/metrics"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -61,6 +62,8 @@ func ReadLoop(conn *connection.Connection) {
 			zap.String("user", conn.UserID),
 		)
 
+		metrics.ActiveConnections.Dec()
+
 		conn.Socket.Close()
 		manager.Remove(conn.UserID, conn)
 		close(conn.Send)
@@ -111,6 +114,8 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 	}
 
 	if msg.Type == "message" {
+		metrics.MessagesTotal.Inc()
+		
 		msg.From = sender.UserID
 		msg.Origin = serverID
 
@@ -193,6 +198,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	logger.Log.Info("user connected",
 		zap.String("user", conn.UserID),
 	)
+
+	metrics.ActiveConnections.Inc()
 
 	manager.Add(conn.UserID, conn)
 	redisClient.AddUserServer(conn.UserID, serverID)
