@@ -77,3 +77,19 @@ func (r *RedisClient) GetNextSequence(conversationID string) (int64, error) {
 	}
 	return seq, nil
 }
+
+func (r *RedisClient) AllowMessage(userID string, limit int) bool {
+	key := "rate:"+userID
+
+	count,err := r.Client.Incr(ctx,key).Result()
+	if err!= nil{
+		return false
+	}
+	if count == 1 {
+		r.Client.Expire(ctx, key, time.Second)
+	}
+	if count>int64(limit) {
+		return false
+	}
+	return true
+}

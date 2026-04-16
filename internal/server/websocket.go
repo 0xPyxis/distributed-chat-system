@@ -74,6 +74,10 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 	var msg message.Message
 	json.Unmarshal(data, &msg)
 
+	if !redisClient.AllowMessage(sender.UserID, 5) {
+		return
+	}
+
 	if msg.Type == "message" {
 		// set basic fields
 		msg.From = sender.UserID
@@ -91,7 +95,7 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		msg.SequenceNumber = seq
 
 		// save message
-		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber), )
+		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber))
 		msg.MessageID = msgID
 
 		out, _ := json.Marshal(msg)
@@ -115,7 +119,7 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 					select {
 					case conn.Send <- out:
 						// ok
-					default :
+					default:
 						// channel full -> handle backpressure
 						manager.Remove(conn.UserID, conn)
 						conn.Socket.Close()
@@ -173,14 +177,14 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	for _, m := range msgs {
 		outMsg := message.Message{
-			Type:      "message",
-			From:      m.Sender,
-			To:        m.Receiver,
-			Body:      m.Body,
-			MessageID: m.ID,
+			Type:           "message",
+			From:           m.Sender,
+			To:             m.Receiver,
+			Body:           m.Body,
+			MessageID:      m.ID,
 			ConversationID: m.ConversationID,
 			SequenceNumber: m.SequenceNumber,
-			Origin:    "storage",
+			Origin:         "storage",
 		}
 		data, _ := json.Marshal(outMsg)
 
