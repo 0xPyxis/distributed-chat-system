@@ -57,12 +57,12 @@ func (s *Store) SaveMessage(sender, receiver, body, conversationID, ClientMsgID 
 }
 
 type DBMessage struct {
-	ID              int
-	Sender          string
-	Receiver        string
-	Body            string
-	ConversationID  string
-	SequenceNumber  int64
+	ID             int
+	Sender         string
+	Receiver       string
+	Body           string
+	ConversationID string
+	SequenceNumber int64
 }
 
 func (s *Store) GetUndelivered(user string) []DBMessage {
@@ -110,4 +110,23 @@ func (s *Store) MarkDelivered(id int) {
 			zap.Error(err),
 		)
 	}
+}
+
+func (s *Store) GetConversationMembers(conversationID string) []string {
+	query := `SELECT user_id FROM conversation_members WHERE conversation_id=$1`
+	rows, err := s.DB.Query(query, conversationID)
+	if err != nil {
+		return nil
+	}
+
+	defer rows.Close()
+
+	var users []string
+
+	for rows.Next() {
+		var u string
+		rows.Scan(&u)
+		users = append(users, u)
+	}
+	return users
 }
