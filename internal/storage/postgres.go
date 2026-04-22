@@ -132,17 +132,17 @@ func (s *Store) GetConversationMembers(conversationID string) []string {
 }
 
 func (s *Store) CreateConversation(conversationID string, members []string) error {
-	tx,err := s.DB.Begin()
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
 
 	// insert conversation
-	_,err = tx.Exec(
+	_, err = tx.Exec(
 		"INSERT INTO conversations (id) VALUES ($1)",
 		conversationID,
 	)
-	if err!=nil {
+	if err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -154,7 +154,7 @@ func (s *Store) CreateConversation(conversationID string, members []string) erro
 			conversationID,
 			user,
 		)
-		if err!= nil {
+		if err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -163,10 +163,36 @@ func (s *Store) CreateConversation(conversationID string, members []string) erro
 }
 
 func (s *Store) AddMember(conversationID, userID string) error {
-	_,err := s.DB.Exec(
+	_, err := s.DB.Exec(
 		"INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2)",
 		conversationID,
 		userID,
 	)
 	return err
+}
+
+func (s *Store) GetMessages(conversationID string, beforeSeq int64, limit int) []DBMessage {
+	query := `
+	SELECT id, sender, receiver, body, conversation_id, sequence_number
+	FROM messages
+	WHERE conversation_id = $1 AND sequence_number < $2
+	ORDER BY sequence_number DESC
+	LIMIT $3
+	`
+
+	rows, err := s.DB.Query(query, conversationID, beforeSeq, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []DBMessage
+
+	for rows.Next() {
+		var m DBMessage
+		rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Body, &m.ConversationID, &m.SequenceNumber) // convert DB row into struct
+		result = append(result, m)
+	}
+
+	return result
 }

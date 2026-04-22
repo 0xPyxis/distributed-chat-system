@@ -29,3 +29,31 @@ func CreateGroupHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 }
+
+type GetMessagesRequest struct {
+	ConversationID string `json:"conversation_id"`
+	BeforeSeq      int64  `json:"before_seq"`
+	Limit          int    `json:"limit"`
+}
+
+func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	var req GetMessagesRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", 400)
+		return
+	}
+
+	// default values
+	if req.Limit == 0 {
+		req.Limit = 50
+	}
+	if req.BeforeSeq == 0 {
+		req.BeforeSeq = 1 << 62 // very large number (start from latest)
+	}
+
+	msgs := store.GetMessages(req.ConversationID, req.BeforeSeq, req.Limit)
+
+	resp, _ := json.Marshal(msgs)
+	w.Write(resp)
+}
