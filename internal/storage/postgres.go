@@ -130,3 +130,43 @@ func (s *Store) GetConversationMembers(conversationID string) []string {
 	}
 	return users
 }
+
+func (s *Store) CreateConversation(conversationID string, members []string) error {
+	tx,err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+
+	// insert conversation
+	_,err = tx.Exec(
+		"INSERT INTO conversations (id) VALUES ($1)",
+		conversationID,
+	)
+	if err!=nil {
+		tx.Rollback()
+		return err
+	}
+
+	// insert members
+	for _, user := range members {
+		_, err := tx.Exec(
+			"INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2)",
+			conversationID,
+			user,
+		)
+		if err!= nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) AddMember(conversationID, userID string) error {
+	_,err := s.DB.Exec(
+		"INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2)",
+		conversationID,
+		userID,
+	)
+	return err
+}
