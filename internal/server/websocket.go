@@ -4,9 +4,9 @@ import (
 	"distributed-chat-system/internal/connection"
 	"distributed-chat-system/internal/logger"
 	"distributed-chat-system/internal/message"
+	"distributed-chat-system/internal/metrics"
 	"distributed-chat-system/internal/pubsub"
 	"distributed-chat-system/internal/storage"
-	"distributed-chat-system/internal/metrics"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -115,11 +115,11 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 
 	if msg.Type == "message" {
 		metrics.MessagesTotal.Inc()
-		
+
 		msg.From = sender.UserID
 		msg.Origin = serverID
 
-		conversationID := getConversationID(msg.From, msg.To)
+		conversationID := msg.ConversationID
 		msg.ConversationID = conversationID
 
 		seq, err := redisClient.GetNextSequence(conversationID)
@@ -128,37 +128,48 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		}
 		msg.SequenceNumber = seq
 
-		msgID := store.SaveMessage(msg.From, msg.To, msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber))
+		msgID := store.SaveMessage(msg.From, "", msg.Body, msg.ConversationID, msg.ClientMsgID, int64(msg.SequenceNumber))
 		msg.MessageID = msgID
 
 		out, _ := json.Marshal(msg)
 
 		redisClient.Publish("chat", out)
 
-		targetServers := redisClient.GetUserServers(msg.To)
+		members := store.GetConversationMembers(msg.ConversationID)
 
-		if len(targetServers) == 0 {
+		if len(members) == 0 {
+			logger.Log.Warn("no members found",
+				zap.String("conversation", msg.ConversationID),
+			)
 			return
 		}
 
-		for _, srv := range targetServers {
-			if srv == serverID {
-				targets := manager.Get(msg.To)
-				for _, conn := range targets {
-					select {
-					case conn.Send <- out:
-					default:
-						logger.Log.Warn("backpressure disconnect",
-							zap.String("user", conn.UserID),
-						)
-						conn.Socket.Close()
-						manager.Remove(conn.UserID, conn)
-					}
-				}
+		for _, user := range members {
+			if user == sender.UserID {
 				continue
 			}
 
-			redisClient.Publish("chat:"+srv, out)
+			targetServers := redisClient.GetUserServers(user)
+			for _, srv := range targetServers {
+				if srv == serverID {
+					targets := manager.Get(user)
+					for _, conn := range targets {
+						select {
+						case conn.Send <- out:
+						default:
+							logger.Log.Warn("backpressure disconnect",
+								zap.String("user", conn.UserID),
+							)
+							conn.Socket.Close()
+							manager.Remove(conn.UserID, conn)
+						}
+					}
+					continue
+				}
+				redisClient.Publish("chat:"+srv, out)
+
+			}
+
 		}
 	}
 
