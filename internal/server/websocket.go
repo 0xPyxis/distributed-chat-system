@@ -50,6 +50,31 @@ func init() {
 			}
 		}
 	})
+
+	redisClient.Subscribe("typing", func(data []byte) {
+		var msg message.Message
+		json.Unmarshal(data, &msg)
+
+		members := store.GetConversationMembers(msg.ConversationID)
+
+		for _, user := range members {
+			if user == msg.From {
+				continue
+			}
+
+			targets := manager.Get(user)
+
+			for _, conn := range targets {
+				select {
+				case conn.Send <- data:
+				default:
+					conn.Socket.Close()
+					manager.Remove(conn.UserID, conn)
+				}
+			}
+		}
+	})
+
 }
 
 func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
@@ -110,6 +135,17 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 		logger.Log.Warn("rate limited",
 			zap.String("user", sender.UserID),
 		)
+		return
+	}
+
+	if msg.Type == "typing" {
+		msg.From = sender.UserID
+		msg.Origin = serverID
+
+		out, _ := json.Marshal(msg)
+
+		//publish to all servers (same as message flow)
+		redisClient.Publish("typing", out)
 		return
 	}
 
