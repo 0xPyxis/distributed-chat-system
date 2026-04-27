@@ -23,6 +23,7 @@ func main() {
 	http.HandleFunc("/ws", server.HandleWebSocket)
 	http.HandleFunc("/create-group", server.CreateGroupHandler)
 	http.HandleFunc("/messages", server.GetMessagesHandler)
+	http.HandleFunc("/seen", server.MarkSeenHandler)
 
 	log.Println("server running on :8080")
 	http.ListenAndServe(":8080", nil)

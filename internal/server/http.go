@@ -57,3 +57,24 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	resp, _ := json.Marshal(msgs)
 	w.Write(resp)
 }
+
+type MarkSeenRequest struct {
+	ConversationID string `json:"conversation_id"`
+	SequenceNumber int64 `json:"sequence_number"`
+	UserID 		   string `json:"user_id"`
+}
+
+func MarkSeenHandler(w http.ResponseWriter, r *http.Request){
+	var req MarkSeenRequest
+	if err:=json.NewDecoder(r.Body).Decode(&req); err!=nil{
+		http.Error(w,"Invalid request",400)
+		return
+	}
+	
+	err:=store.UpdateLastSeen(req.ConversationID,req.UserID,req.SequenceNumber)
+	if err!=nil{
+		http.Error(w,"failed",500)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

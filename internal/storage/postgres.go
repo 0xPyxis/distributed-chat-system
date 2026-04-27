@@ -196,3 +196,14 @@ func (s *Store) GetMessages(conversationID string, beforeSeq int64, limit int) [
 
 	return result
 }
+
+func (s *Store) UpdateLastSeen(conversationID, userID string, seq int64) error {
+	query := `
+	INSERT INTO conversation_reads (conversation_id,user_id,last_seen_seq)
+	VALUES ($1,$2,$3)
+	ON CONFLICT (conversation_id,user_id)
+	DO UPDATE SET last_seen_seq=GREATEST(conversation_reads.last_seen_seq,$3)
+	`
+	_, err := s.DB.Exec(query, conversationID, userID, seq)
+	return err
+}
