@@ -7,6 +7,7 @@ import (
 
 	"distributed-chat-system/internal/logger"
 	"go.uber.org/zap"
+	"distributed-chat-system/internal/message"
 )
 
 type Store struct {
@@ -206,4 +207,29 @@ func (s *Store) UpdateLastSeen(conversationID, userID string, seq int64) error {
 	`
 	_, err := s.DB.Exec(query, conversationID, userID, seq)
 	return err
+}
+
+func (s *Store) GetMessageByID(id int) *message.Message {
+	query := `
+	SELECT sender, body, conversation_id, sequence_number
+	FROM messages WHERE id=$1
+	`
+
+	var m message.Message
+
+	err := s.DB.QueryRow(query, id).Scan(
+		&m.From,
+		&m.Body,
+		&m.ConversationID,
+		&m.SequenceNumber,
+	)
+
+	if err != nil {
+		return nil
+	}
+
+	m.MessageID = id
+	m.Type = "message"
+
+	return &m
 }
