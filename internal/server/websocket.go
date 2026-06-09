@@ -197,14 +197,19 @@ func handleIncoming(sender *connection.Connection, manager *connection.Manager, 
 			msg.SequenceNumber,
 		)
 
+		if msgID == 0 {
+			logger.Log.Error("message save failed, dropping message",
+				zap.String("conversation_id", msg.ConversationID),
+				zap.String("client_msg_id", msg.ClientMsgID),
+			)
+			return
+		}
+
 		msg.MessageID = msgID
-
 		out, _ := json.Marshal(msg)
-
-		// store pending ACK
 		pendingAcks.Store(msgID, time.Now())
-
 		deliverMessage(&msg, out)
+		return
 	}
 
 	// ===== ACK =====
@@ -222,12 +227,13 @@ func ReadLoop(conn *connection.Connection) {
 		manager.Remove(conn.UserID, conn)
 		close(conn.Send)
 		redisClient.RemoveUserServer(conn.UserID, serverID)
+		close(conn.Done)
 	}()
 
 	for {
 		_, data, err := conn.Socket.ReadMessage()
 		if err != nil {
-			break
+			return
 		}
 
 		handleIncoming(conn, manager, data)
@@ -238,6 +244,7 @@ func WriteLoop(conn *connection.Connection) {
 	for msg := range conn.Send {
 		err := conn.Socket.WriteMessage(websocket.TextMessage, msg)
 		if err != nil {
+			conn.Socket.Close()
 			return
 		}
 	}
@@ -268,6 +275,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		UserID: msg.From,
 		Socket: ws,
 		Send:   make(chan []byte, 256),
+		Done:   make(chan struct{}),
 	}
 
 	metrics.ActiveConnections.Inc()
@@ -275,7 +283,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	manager.Add(conn.UserID, conn)
 	redisClient.AddUserServer(conn.UserID, serverID)
 
-	go startHeartbeat(conn.UserID)
+	go startHeartbeat(conn)
 
 	msgs := store.GetUndelivered(conn.UserID)
 
@@ -296,9 +304,15 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func startHeartbeat(userID string) {
+func startHeartbeat(conn *connection.Connection) {
 	ticker := time.NewTicker(10 * time.Second)
-	for range ticker.C {
-		redisClient.AddUserServer(userID, serverID)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-conn.Done:
+			return
+		case <-ticker.C:
+			redisClient.AddUserServer(conn.UserID, serverID)
+		}
 	}
 }

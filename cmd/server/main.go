@@ -4,9 +4,10 @@ import (
 	"distributed-chat-system/internal/logger"
 	"distributed-chat-system/internal/metrics"
 	"distributed-chat-system/internal/server"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -17,7 +18,9 @@ func main() {
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		http.ListenAndServe(":2112", nil)
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			log.Fatalf("metrics server failed: %v", err)
+		}
 	}()
 
 	http.HandleFunc("/ws", server.HandleWebSocket)
@@ -26,5 +29,5 @@ func main() {
 	http.HandleFunc("/seen", server.MarkSeenHandler)
 
 	log.Println("server running on :8080")
-	http.ListenAndServe(":8080", nil)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

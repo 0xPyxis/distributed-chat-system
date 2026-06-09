@@ -6,8 +6,9 @@ import (
 	_ "github.com/lib/pq"
 
 	"distributed-chat-system/internal/logger"
-	"go.uber.org/zap"
 	"distributed-chat-system/internal/message"
+
+	"go.uber.org/zap"
 )
 
 type Store struct {
@@ -20,6 +21,10 @@ func NewStore() *Store {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		logger.Log.Fatal("db connection failed", zap.Error(err))
+	}
+
+	if err = db.Ping(); err != nil {
+		logger.Log.Fatal("db ping failed", zap.Error(err))
 	}
 
 	return &Store{DB: db}
@@ -35,23 +40,25 @@ func (s *Store) SaveMessage(sender, receiver, body, conversationID, ClientMsgID 
 
 	var id int
 	err := s.DB.QueryRow(query, sender, receiver, body, conversationID, seq, ClientMsgID).Scan(&id)
-
 	if err != nil {
-		// duplicate or error
-		logger.Log.Warn("insert conflict or failed, fetching existing",
+		if err == sql.ErrNoRows {
+			query2 := `SELECT id FROM messages WHERE client_msg_id=$1`
+			err2 := s.DB.QueryRow(query2, ClientMsgID).Scan(&id)
+			if err2 != nil {
+				logger.Log.Error("failed to fetch existing message",
+					zap.String("client_msg_id", ClientMsgID),
+					zap.Error(err2),
+				)
+				return 0
+			}
+			return id
+		}
+
+		logger.Log.Error("failed to save message",
 			zap.String("client_msg_id", ClientMsgID),
 			zap.Error(err),
 		)
-
-		query2 := `SELECT id FROM messages WHERE client_msg_id=$1`
-		err2 := s.DB.QueryRow(query2, ClientMsgID).Scan(&id)
-		if err2 != nil {
-			logger.Log.Error("failed to fetch existing message",
-				zap.String("client_msg_id", ClientMsgID),
-				zap.Error(err2),
-			)
-			return 0
-		}
+		return 0
 	}
 
 	return id
@@ -117,6 +124,10 @@ func (s *Store) GetConversationMembers(conversationID string) []string {
 	query := `SELECT user_id FROM conversation_members WHERE conversation_id=$1`
 	rows, err := s.DB.Query(query, conversationID)
 	if err != nil {
+		logger.Log.Error("failed to fetch conversation members",
+			zap.String("conversation_id", conversationID),
+			zap.Error(err),
+		)
 		return nil
 	}
 
@@ -126,7 +137,13 @@ func (s *Store) GetConversationMembers(conversationID string) []string {
 
 	for rows.Next() {
 		var u string
-		rows.Scan(&u)
+		if err := rows.Scan(&u); err != nil {
+			logger.Log.Error("failed to scan conversation member",
+				zap.String("conversation_id", conversationID),
+				zap.Error(err),
+			)
+			continue
+		}
 		users = append(users, u)
 	}
 	return users
@@ -173,6 +190,10 @@ func (s *Store) AddMember(conversationID, userID string) error {
 }
 
 func (s *Store) GetMessages(conversationID string, beforeSeq int64, limit int) []DBMessage {
+	if limit <= 0 {
+		limit = 50
+	}
+
 	query := `
 	SELECT id, sender, receiver, body, conversation_id, sequence_number
 	FROM messages
@@ -183,6 +204,10 @@ func (s *Store) GetMessages(conversationID string, beforeSeq int64, limit int) [
 
 	rows, err := s.DB.Query(query, conversationID, beforeSeq, limit)
 	if err != nil {
+		logger.Log.Error("failed to query messages",
+			zap.String("conversation_id", conversationID),
+			zap.Error(err),
+		)
 		return nil
 	}
 	defer rows.Close()
@@ -191,7 +216,12 @@ func (s *Store) GetMessages(conversationID string, beforeSeq int64, limit int) [
 
 	for rows.Next() {
 		var m DBMessage
-		rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Body, &m.ConversationID, &m.SequenceNumber) // convert DB row into struct
+		if err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Body, &m.ConversationID, &m.SequenceNumber); err != nil {
+			logger.Log.Error("failed to scan message row",
+				zap.Error(err),
+			)
+			continue
+		}
 		result = append(result, m)
 	}
 

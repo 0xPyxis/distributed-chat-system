@@ -5,5 +5,6 @@ import "github.com/gorilla/websocket"
 type Connection struct {
 	UserID string
 	Socket *websocket.Conn
-	Send chan[] byte
+	Send   chan []byte
+	Done   chan struct{}
 }

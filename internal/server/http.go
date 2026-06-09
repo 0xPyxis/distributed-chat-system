@@ -3,8 +3,9 @@ package server
 import (
 	"distributed-chat-system/internal/logger"
 	"encoding/json"
-	"go.uber.org/zap"
 	"net/http"
+
+	"go.uber.org/zap"
 )
 
 type CreateGroupRequest struct {
@@ -45,11 +46,11 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// default values
-	if req.Limit == 0 {
+	if req.Limit <= 0 {
 		req.Limit = 50
 	}
-	if req.BeforeSeq == 0 {
-		req.BeforeSeq = 1 << 62 // very large number (start from latest)
+	if req.BeforeSeq <= 0 {
+		req.BeforeSeq = 1<<62 // very large number (start from latest)
 	}
 
 	msgs := store.GetMessages(req.ConversationID, req.BeforeSeq, req.Limit)
