@@ -41,14 +41,34 @@ func init() {
 			return
 		}
 
-		targets := manager.Get(msg.To)
+		if msg.To != "" {
+			targets := manager.Get(msg.To)
+			for _, conn := range targets {
+				select {
+				case conn.Send <- data:
+				default:
+					conn.Socket.Close()
+					manager.Remove(conn.UserID, conn)
+				}
+			}
+			return
+		}
 
-		for _, conn := range targets {
-			select {
-			case conn.Send <- data:
-			default:
-				conn.Socket.Close()
-				manager.Remove(conn.UserID, conn)
+		if msg.ConversationID != "" {
+			members := store.GetConversationMembers(msg.ConversationID)
+			for _, user := range members {
+				if user == msg.From {
+					continue
+				}
+				targets := manager.Get(user)
+				for _, conn := range targets {
+					select {
+					case conn.Send <- data:
+					default:
+						conn.Socket.Close()
+						manager.Remove(conn.UserID, conn)
+					}
+				}
 			}
 		}
 	})
